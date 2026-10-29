@@ -1,0 +1,11 @@
+schema_version: 1
+parameters:
+  protect_nose: true
+  fairing_scale_mm: 4.0
+  # 用粗表面判断朝向，避免凹坑壁被逐面排除；侧面留出适度余量。
+  normal_scale_mm: 3.0
+  minimum_facing_cosine: -0.4
+  # 沿网格向轮廓外扩展，给侧脸边界附近的深点留下平滑过渡空间。
+  domain_padding_mm: 6.0
+  maximum_displacement_mm: 2.0
+  transition_mm: 2.0

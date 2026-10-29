@@ -1,0 +1,10 @@
+schema_version: 1
+parameters:
+  sample_count: 20000
+  max_iterations: 60
+  trim_fraction: 0.85
+  seed: 1
+  render_resolution: 512
+  supersampling: 2
+  profile_width: 2400
+  profile_height: 1200

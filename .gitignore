@@ -1,0 +1,16 @@
+environment/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+artifacts/
+artifacts_test/
+archive/
+tests/
+技术文档写作规范.md
+data/
+docs/
+scripts/
+

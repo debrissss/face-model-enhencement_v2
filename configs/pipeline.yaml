@@ -1,0 +1,23 @@
+schema_version: 1
+pipeline:
+  stages:
+    - id: region_detection
+      config: stages/region_detection.yaml
+    - id: face_smoothing
+      config: stages/face_smoothing.yaml
+    - id: frontal_normal_constraint
+      config: stages/frontal_normal_constraint.yaml
+    - id: eye_height_constraint
+      config: stages/eye_height_constraint.yaml
+    - id: brow_depth_constraint
+      config: stages/brow_depth_constraint.yaml
+    - id: result_comparison
+      config: stages/result_comparison.yaml
+  visualize:
+    - region_detection
+    - face_smoothing
+    - frontal_normal_constraint
+    - eye_height_constraint
+    - brow_depth_constraint
+    - result_comparison
+

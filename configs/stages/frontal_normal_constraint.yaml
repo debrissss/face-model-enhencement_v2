@@ -1,0 +1,5 @@
+schema_version: 1
+parameters:
+  iterations: 6
+  strength: 1.0
+

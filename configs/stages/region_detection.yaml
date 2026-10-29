@@ -1,0 +1,6 @@
+schema_version: 1
+parameters:
+  model: ../../data/models/face_landmarker.task
+  # 到眼睛开口的最大欧氏距离（像素），嘴唇和眉毛不外扩。
+  eye_padding: 18
+
