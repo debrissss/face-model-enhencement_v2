@@ -4,16 +4,16 @@ from dataclasses import replace
 from typing import Generic, Literal, TypeVar
 
 from ..config import StageConfig
-from ..models import BrowDepthResult, ComparisonResult, ConstraintResult, PipelineData, Regions, SmoothingResult
+from ..models import MultiViewAlignment, BrowDepthResult, ComparisonResult, ConstraintResult, PipelineData, Regions, SmoothingResult
 
 ConfigT = TypeVar("ConfigT", bound=StageConfig)
-ResultT = TypeVar("ResultT", Regions, ConstraintResult, ComparisonResult, BrowDepthResult, SmoothingResult)
+ResultT = TypeVar("ResultT", MultiViewAlignment, Regions, ConstraintResult, ComparisonResult, BrowDepthResult, SmoothingResult)
 
 
 class BaseStage(ABC, Generic[ConfigT, ResultT]):
     """定义阶段计算接口，并通过浅替换生成包含新结果的数据包。"""
     name: str
-    output_field: Literal["regions", "constraint", "comparison", "brow_depth", "smoothing", "eye_height"]
+    output_field: Literal["alignment", "regions", "constraint", "comparison", "brow_depth", "smoothing", "eye_height"]
 
     def run(self, data: PipelineData, config: ConfigT) -> PipelineData:
         """调用阶段计算后统一写回结果字段，保留其他上游字段的引用。"""

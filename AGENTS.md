@@ -151,7 +151,7 @@ class ExampleStage(BaseStage):
 ### 5. Pipeline 约束（对应 `pipeline.py`）
 
 
-- 每次执行是一次 Run，必须具有唯一 ID 和配置快照；运行名称由 Pipeline 根据运行时间、输入文件名等自动组装，并处理重名以保证唯一性。
+- 每次执行是一次 Run，必须具有唯一 ID 和配置快照；运行名称由 Pipeline 按第 11 节区分开发测试与正式运行生成，并处理重名以保证唯一性。开发测试的运行目的由发起运行者明确传入，不从配置文件名或输入文件名推断。
 - Stage 之间只通过内存中的 `PipelineData` 传递数据，不得以文件作为常规交接。
 
 #### 示例
@@ -333,7 +333,7 @@ parameters:
 - 输出路径只使用一个 `--output` 参数：正式运行输出到 `artifacts`，开发测试输出到 `artifacts_test`。
 - `--config` 指定 Pipeline 配置文件路径。
 - CLI 不覆盖 `pipeline.visualize`。
-- 运行名称由 Pipeline 自动组装，不提供 `--run-name` 参数。
+- 运行名称由 Pipeline 按第 11 节自动组装，不提供 `--run-name` 参数。运行入口须支持显式传入开发测试的运行目的（`task`）；正式运行的编号由 Pipeline 自动分配。
 
 ```bash
 # 正式运行：示例包含两个输入路径，分别调用一次 IO 读取
@@ -387,3 +387,71 @@ pipeline3d run --input_example_a data/input/example_a.dat --output artifacts_tes
 * **确保语义精确**：名称应准确反映变量所表示的数据及其含义，而不只是描述数据的来源或用途。
 
 * **避免无意义的重命名**：除非现有名称存在歧义或语义不准确，否则不要仅为统一风格而重命名变量。
+
+### 11. 输出目录与文件约束
+
+本节规定实际输出目录与文件；前文目录、运行命名及可视化示例与本节不一致时，以本节为准。
+
+#### 11.1 单次运行目录
+
+- 每次运行在 `--output` 指定的目录下创建一个独立文件夹，本次运行处理的所有数据组均保存在该文件夹内。
+- 开发测试保存至 `artifacts_test/`，文件夹命名格式为 `<yy-mm-dd-hh-mm>-<task>`；时间采用运行开始时的本地时间，精确到分钟。
+- `task` 表示**本次运行要验证什么、为何发起这次运行**，不表示代码本身执行的业务任务。例如，新增 Stage 后验证其功能、修改参数后检查效果、拆分可视化器后验证输出布局，均应在 `task` 中体现。
+- `task` 使用简洁的英文小写单词、数字和下划线，例如 `test_new_eye_height_stage`、`test_smoothing_scale_4mm`、`test_visualizer_split`。不得仅使用 `pipeline`、`face_enhancement`、配置文件名、数据组名称或 Stage 名称代替运行目的。
+- 发起运行者应根据本次用户请求或已明确的测试计划确定 `task`，并通过运行入口显式传入；上下文已明确测试目的时直接据此命名，无需额外确认。Pipeline 仅负责拼接时间与 `task`、保证名称唯一，不自行推断测试目的。
+- 同一分钟内相同目的的重复测试，在 `task` 后追加递增序号，例如 `26-11-05-14-30-test_visualizer_split_02`，不得覆盖已有运行目录。
+- 正式运行保存至 `artifacts/`，采用固定前缀与递增编号组织，格式为 `run_<编号>`，例如 `run_0001`、`run_0002`；编号至少四位，在该输出目录内按已有最大编号递增，不覆盖或复用已有编号。
+- 开发测试与正式运行仅采用不同的运行目录命名方式，运行目录内部的数据组、阶段、日志和配置快照结构一致。
+
+#### 11.2 数据组与阶段目录
+
+- 每一组数据使用独立目录，目录名与输入数据组目录名一致。例如，输入为 `data/input/dyx`，输出数据组目录名必须为 `dyx`。
+- 每组数据按处理阶段分别保存，阶段目录名必须与配置中的 Stage ID 一致。
+- 只有列入 `pipeline.visualize` 的阶段才保存可视化产物；未启用可视化的阶段不创建输出目录。
+
+#### 11.3 运行级文件
+
+“只保存可视化产物”适用于数据组的阶段目录；运行级配置快照和日志继续保留在运行目录下，不放入数据组或阶段目录。
+
+| 相对路径 | 内容 |
+|---|---|
+| `run.log` | 本次运行日志，包含运行标识、数据组名称、阶段标识、状态、耗时及异常上下文；算法、序列化、可视化耗时分开记录 |
+| `config_snapshot/pipeline.yaml` | 本次实际使用的 Pipeline 配置快照 |
+| `config_snapshot/stages/<stage_id>.yaml` | 本次实际使用的各阶段配置快照，每个配置阶段一个文件 |
+
+#### 11.4 目录示例
+
+以下以拆分可视化器后，使用 `dyx` 验证输出布局的开发测试为例；其他数据组在同一运行目录下建立同级目录，采用相同结构。仅为启用可视化的阶段创建产物目录。正式运行则使用 `artifacts/run_0001/` 等目录，其内部结构相同。
+
+```text
+artifacts_test/
+└── 26-11-05-14-30-test_visualizer_split/
+    ├── run.log
+    ├── config_snapshot/
+    │   ├── pipeline.yaml
+    │   └── stages/
+    │       ├── region_detection.yaml
+    │       ├── face_smoothing.yaml
+    │       ├── frontal_normal_constraint.yaml
+    │       ├── eye_height_constraint.yaml
+    │       ├── brow_depth_constraint.yaml
+    │       └── result_comparison.yaml
+    └── dyx/
+        ├── region_detection/
+        │   └── regions.png
+        ├── face_smoothing/
+        │   ├── mesh.ply
+        │   └── views.png
+        ├── frontal_normal_constraint/
+        │   ├── mesh.ply
+        │   └── views.png
+        ├── eye_height_constraint/
+        │   ├── mesh.ply
+        │   └── views.png
+        ├── brow_depth_constraint/
+        │   ├── mesh.ply
+        │   └── views.png
+        └── result_comparison/
+            ├── render-comparison.png
+            └── midline-comparison.png
+```

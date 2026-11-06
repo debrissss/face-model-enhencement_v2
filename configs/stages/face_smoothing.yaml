@@ -7,5 +7,4 @@ parameters:
   minimum_facing_cosine: -0.4
   # 沿网格向轮廓外扩展，给侧脸边界附近的深点留下平滑过渡空间。
   domain_padding_mm: 6.0
-  maximum_displacement_mm: 2.0
   transition_mm: 2.0

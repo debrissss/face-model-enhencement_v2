@@ -1,4 +1,5 @@
 environment/
+.DS_Store
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -13,4 +14,6 @@ tests/
 data/
 docs/
 scripts/
-
+output/
+tech_doc/
+.idea/

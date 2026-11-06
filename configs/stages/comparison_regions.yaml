@@ -1,0 +1,9 @@
+schema_version: 1
+parameters:
+  model: ../../data/models/face_landmarker.task
+  regions: [forehead, eyes, nose, mouth, chin, cheeks]
+  # 外扩距离 / 左右眼中心间距；分区为关键点几何近似，可相互重叠。
+  eye_padding_ratio: 0.16
+  nose_padding_ratio: 0.08
+  mouth_padding_ratio: 0.1
+  visibility_tolerance_mm: 0.1

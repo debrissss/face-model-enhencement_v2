@@ -16,6 +16,7 @@ class MeshData:
     """保存原始顶点坐标与三角面索引，不执行顶点合并或拓扑调整。"""
     vertices: FloatArray  # 形状为 (N,3)，沿用原始顶点排列。
     faces: IntArray  # 形状为 (F,3)，沿用原始三角面索引。
+    colors: FloatArray | None = None  # PLY 原始顶点 RGB，范围 [0,1]。
 
 
 @dataclass(frozen=True)
@@ -132,12 +133,71 @@ class ComparisonResult:
 
 
 @dataclass(frozen=True)
+class PointCloudData:
+    """有限源点按原序保存；颜色和法线均为可选的逐点字段。"""
+    points: FloatArray
+    colors: FloatArray | None = None
+    normals: FloatArray | None = None
+
+
+@dataclass(frozen=True)
+class PointCloudView:
+    cloud: PointCloudData
+    camera: dict
+    removed_nonfinite: int = 0
+
+
+@dataclass(frozen=True)
+class MultiViewPointClouds:
+    views: dict[str, PointCloudView]
+
+
+@dataclass(frozen=True)
+class MultiViewRGB:
+    images: dict[str, ByteArray]
+
+
+@dataclass(frozen=True)
+class AlignedView:
+    cloud: PointCloudData
+    camera: dict
+    transform: FloatArray
+    metrics: dict
+    overlay: ByteArray | None = None
+
+
+@dataclass(frozen=True)
+class MultiViewAlignment:
+    views: dict[str, AlignedView]
+
+    @property
+    def passed(self) -> bool:
+        return all(view.metrics["status"] == "review_candidate" for view in self.views.values())
+
+
+@dataclass(frozen=True)
+class ComparisonRegions:
+    """独立区域掩码；区域允许重叠，不覆盖增强流程的区域标签。"""
+    names: tuple[str, ...]
+    landmarks: FloatArray
+    image_masks: BoolArray  # (R,H,W)，原始 RGB 像素系。
+    vertex_masks: BoolArray  # (R,N)，网格高度带包含原相机遮挡的顶点；其他分区保留相机可见性限制。
+    view_height_bounds_mm: FloatArray | None = None  # (R,2)，正面视图上下截平面；其他区域为无穷边界。
+
+
+@dataclass(frozen=True)
+class SurfaceDistanceResult:
+    """待对比网格各原始顶点到参考三角面的无符号距离，单位 mm。"""
+    distance_mm: FloatArray
+
+
+@dataclass(frozen=True)
 class PipelineData:
     """统一承载阶段输入和计算结果；阶段写回新容器，上游数组按只读约定共享。"""
     mesh: MeshData
-    rgb: RGBImage
-    normal: NormalMap
-    camera: Camera
+    rgb: RGBImage | None = None
+    normal: NormalMap | None = None
+    camera: Camera | None = None
     source_name: str = "model"
     regions: Regions | None = None
     constraint: ConstraintResult | None = None
@@ -148,6 +208,12 @@ class PipelineData:
     smoothing: SmoothingResult | None = None
 
     eye_height: ConstraintResult | None = None
+    point_clouds: MultiViewPointClouds | None = None
+    multi_view_rgb: MultiViewRGB | None = None
+    alignment: MultiViewAlignment | None = None
+    reference: MeshData | None = None
+    comparison_regions: ComparisonRegions | None = None
+    surface_distance: SurfaceDistanceResult | None = None
 
     @property
     def enhanced_mesh(self) -> MeshData:

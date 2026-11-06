@@ -37,13 +37,13 @@ environment/bin/face-model-enhance run \
 
 区域使用一套标签：`0=其他`、`1=右眼球`、`2=右眼睑`、`3=左眼球`、`4=左眼睑`、`5=嘴部`、`6=右眉`、`7=左眉`。左右按被摄者区分；未经镜像的正面图中，右眼通常位于图像左侧。二维像素、网格顶点和面各保存一组对应的 `labels`，不保存 `components` 数组。区域掩码独立生成，统一按眉毛、右眼、左眼、嘴部的顺序赋值，重叠时后写入的覆盖前面的标签。后续阶段在方法内合并同眼的眼球和眼睑标签。旧版本双标签及上下眼睑分开的产物编号不兼容新格式，需从原始输入重新运行；不自动改写旧产物，现有 `model_regions.npz` 不作为 Stage 输入。
 
-`face_smoothing` 位于区域检测与眼口法线约束之间，以 NumPy/SciPy 在 CPU 上计算，不依赖预测法线图。阶段先按表面弯曲和原位置约束求三维整形方向，再沿这些方向求有界位移。处理域以 `FACE_OVAL` 为起点，沿网格边长向外扩展 `domain_padding_mm=6` mm，使侧脸轮廓附近的过渡不再过早压住深点。朝向在 `normal_scale_mm=3` mm 的隐式扩散参考表面上计算，以 `minimum_facing_cosine=-0.4` 保留侧面余量，不直接用每个原始小三角面的朝向筛掉坑壁。眉毛、眼球、眼睑及嘴部标签固定；`protect_nose: true` 时，鼻梁、鼻尖、鼻翼关键点二维凸包内的顶点和接触保护面的顶点也固定。不改写区域检测标签。
+`face_smoothing` 位于区域检测与眼口法线约束之间，以 NumPy/SciPy 在 CPU 上计算，不依赖预测法线图。阶段直接求解技术说明 2.2 节的曲率与原始位置保持三维二次能量，并将该三维位移作为最终平滑结果。处理域以 `FACE_OVAL` 为起点，沿网格边长向外扩展 `domain_padding_mm=6` mm，使侧脸轮廓附近的过渡不再过早压住深点。朝向在 `normal_scale_mm=3` mm 的隐式扩散参考表面上计算，以 `minimum_facing_cosine=-0.4` 保留侧面余量，不直接用每个原始小三角面的朝向筛掉坑壁。眉毛、眼球、眼睑及嘴部标签固定；`protect_nose: true` 时，鼻梁、鼻尖、鼻翼关键点二维凸包内的顶点和接触保护面的顶点也固定。不改写区域检测标签。
 
 平滑内部合并完全相同坐标的顶点用于计算；任一原始副本或关联面属于域外时固定该分析顶点，开放及非流形边界、未引用顶点同样固定。沿网格边长计算至固定顶点的距离，使用五次过渡函数 `u³(10−15u+6u²)`，其中 `u=clip(distance/transition_mm,0,1)`。输出恢复原始顶点排列和面索引，重合副本保持一致；不将合并后的拓扑交给后续 Stage。
 
-正式配置的整形尺度 `fairing_scale_mm` 为 4 mm、最大位移为 2 mm、边界过渡为 2 mm。整形使用原始三角面余切刚度及顶点面积构建线性系统；越靠近固定边界，位置约束越强、位移预算越小。弯曲项只计可移动顶点，固定区域提供边界位置，避免为了消除固定边缘的离散曲率而把网格沿表面拉向边界。`normal_scale_mm` 只影响处理域的朝向估计，不限制最终整形方向。
+正式配置的整形尺度 `fairing_scale_mm` 为 4 mm、边界过渡为 2 mm。整形使用原始三角面余切刚度及顶点面积构建线性系统；越靠近固定边界，位置保持惩罚越强。弯曲项只计可移动顶点，固定区域提供边界位置，避免为了消除固定边缘的离散曲率而把网格沿表面拉向边界。`normal_scale_mm` 只影响处理域的朝向估计，不限制最终整形方向。
 
-位移超过局部预算时求解带边界的二次优化，不直接裁剪结果。对实际出现有向投影面积低于原始值 5% 的三角面，局部求解面积约束，同时约束所有与相关顶点相连的面，防止把小面压翻；这不等于全局自交检测。每点相对原始坐标的位移长度不超过 `maximum_displacement_mm × gate`。算法不直接优化颜色，热力图仍以 2 mm 邻域平面拟合残差独立评估；自然曲率和噪声都会计入该指标，不保证全脸为零起伏。
+正式平滑已移除位移方向固定后的标量求解、位移硬上限及面片朝向约束；不裁剪位移，不执行面片局部修正或全局自交检测。位置保持能量只惩罚位移，不保证最大位移或面片朝向。旧实现、配置、测试、相关脚本及文档快照保存在 `archive/bounded_face_smoothing_20261103-093441/`，来源摘要见 `sha256.json`。旧平滑 YAML 重跑时需删除 `maximum_displacement_mm`，该字段会被配置加载器拒绝；眉毛阶段的同名预算参数保留。算法不直接优化颜色，热力图仍以 2 mm 邻域平面拟合残差独立评估；自然曲率和噪声都会计入该指标。
 
 旧引导法线滤波、未使用的法线方向整形及其配置、测试和实验入口已归档到 `archive/guided_face_smoothing_20261029/`。正式阶段不再提供 `method`、`fairing_direction` 或旧引导滤波参数；含这些字段的 YAML 会被拒绝，不执行自动转换。历史运行和配置快照保留原样。当前阶段不执行按样本修复、全局碰撞回退或自动幅度搜索。
 
@@ -90,24 +90,24 @@ delta_depth = ((skin_source - source_depth) - (skin_prediction - predicted_depth
 
 正中纵剖面以原始 RGB 的鼻根关键点 168 在原始 largeV 上的射线交点定位，使用正面相机的横向轴作为平面法向、竖直轴作为高度方向。三组模型使用同一个平面和原点，提取三角面与平面的全部真实交线，不做可见性筛选，不跨断口连接或平滑。三列依次比较 largeV 与 enhanced、largeV 与 3dMD、enhanced 与 3dMD，统一范围并保持横纵等毫米比例；原始为橙色、增强为紫红色、GT 为蓝色，线宽均为 0.3 pt。第一行标注 Full face，横纵坐标分别为相对鼻根的正面轴向深度和高度。第二、三行分别标注 Left eye、Right eye（左右按被摄者区分），使用穿过各眼中心、与全脸剖面平行的纵剖面。眼中心由原始眼角像素中点投射到 largeV 表面确定；各眼剖面的三组模型共享切面和原点，坐标相对该原点。眼部显示半高取双眼原始空间眼宽较大值的 0.65 倍，两眼使用相同放大比例；每行均为三列比较，绘图区宽度与全脸行一致，保持横纵等毫米比例，不筛选交线。`profile_height` 表示每行高度，默认合成图为 2400×3600。
 
-配准指标保存在对比结果的 NPZ 元数据中，其中截尾距离仅描述所选配准样本的拟合情况，不是全脸误差；眼球等局部结构不具有相同的 GT 支持范围。配准失败直接作为阶段计算失败记录，不自动缩放或改用备用算法。
+配准指标保存在内存中的 `PipelineData.comparison.registration` 中，其中截尾距离仅描述所选配准样本的拟合情况，不是全脸误差；眼球等局部结构不具有相同的 GT 支持范围。配准失败直接作为阶段计算失败记录，不自动缩放或改用备用算法。
 
 ## 配置与输出
 
 `configs/pipeline.yaml` 声明 Stage 顺序和 `pipeline.visualize`；各 Stage 参数位于单独 YAML。所有配置引用的相对路径，以所在 YAML 的目录为基准解析。默认顺序为 `region_detection → face_smoothing → frontal_normal_constraint → eye_height_constraint → brow_depth_constraint → result_comparison`。可省略平滑、眼球高度或眉毛阶段；省略眼球高度阶段时不执行高度限制，也可运行合法序列的非空前缀（包括运行至平滑阶段）；原三阶段和四阶段配置仍可加载。默认启用六个阶段及其可视化。
 
-每次运行自动创建唯一目录，包含 `run_log` 和 `config_snapshot/`。快照同时保留原始配置，以及使用已解析模型路径、可重新加载的配置。日志分别记录算法、序列化和可视化耗时。
+每次运行创建 `<output>/<yy-mm-dd-hh-mm>-<task>/`，其中 `task` 取 Pipeline 配置文件名（不含扩展名）；同一分钟内同名运行追加 `_02` 等编号。运行目录包含 `run.log`、可重载的 `config_snapshot/pipeline.yaml` 和 `config_snapshot/stages/<stage_id>.yaml`。输入路径和数据组名称写入日志；算法、PLY 序列化和可视化耗时分开记录。
 
-仅 `pipeline.visualize` 中的 Stage 保存数组并执行可视化。清空列表时仍返回内存计算结果，磁盘仅保留运行日志和配置快照。可视化失败会记录异常，后续计算继续。
+各组产物保存在 `<run>/<group>/<stage_id>/`；CLI 的 `group` 使用输入模型所在数据组目录名，例如 `data/input/dyx/mesh_largeV/model.ply` 对应 `dyx`。仅 `pipeline.visualize` 中的阶段保存下列产物，清空列表时只保留运行日志和配置快照。可视化失败记录异常，内存计算结果继续保留。
 
-- `region_detection/`：类型化 NPZ、`manifest.json`、`regions.png`（关键点和二维区域）、`regions.ply`（网格面着色）、`regions.json`（标签计数与颜色）。
-- `frontal_normal_constraint/`：类型化 NPZ、`manifest.json`、`mesh.ply`（增强网格）、`displacement.png`（原始顶点投影上的带符号 Z 位移）。
-- `eye_height_constraint/`：类型化 NPZ、`manifest.json`、`mesh.ply`、`displacement.png`（本阶段带符号 Z 位移），`eye_height.npz` 与法线阶段的 `constraint.npz` 分别保存。
-- `face_smoothing/`：类型化 NPZ、`manifest.json`、`mesh.ply`、`displacement.png`（本阶段 XYZ 位移长度，白色为零、红色为最大值）。`smoothing.npz` 中的固定掩码和过渡权重对应原始顶点。
-- `brow_depth_constraint/`：类型化 NPZ、`manifest.json`、`mesh.ply`（法线与眉毛增强后的最终网格）、`displacement.png`（本 Stage 的带符号相机深度增量，蓝色向相机、红色远离相机）、`metrics.json`（双眉覆盖率、参考面求解残差、位移及标定指标）。
-- `result_comparison/`：类型化 NPZ、`manifest.json`、`render-comparison.png`（三行三列灰模）、`midline-comparison.png`（全脸、左眼、右眼三行，每行三列两两比较）。辅助数值包括 GT 到 largeV 的 4×4 刚体矩阵、对齐后 GT 坐标、公共取景、剖面原点、真实线段和配准残差；该阶段仅生成两张 PNG，不另导出 GT 网格或九张单视图。
+- `region_detection/`：仅 `regions.png`，叠加关键点和二维区域标签。当前关键点检测与区域分割由同一 Stage 完成。
+- `face_smoothing/`、`frontal_normal_constraint/`、`eye_height_constraint/`、`brow_depth_constraint/`：各保存 `mesh.ply` 和 `views.png`。网格为该阶段的几何结果，三视图从左到右为 Front、Left、Right，左右按被摄者区分；各阶段共用原始模型取景及渲染参数。
+- `result_comparison/`：仅 `render-comparison.png` 和 `midline-comparison.png`。Stage 内连续调用三次 `GrayModelVisualizer`，将 largeV、largeV-enhanced、3dMD 的横排三视图按顺序竖向拼接；再连续调用三次 `ProfileComparisonVisualizer`，将 largeV/enhanced、largeV/3dMD、enhanced/3dMD 的一列三行剖面对比横向拼接。三行依次为 Full face、Left eye、Right eye，三列共用坐标范围。该 Stage 不注册到 Pipeline 的可视化分发器，仍由 `pipeline.visualize` 控制是否在 Stage 内出图。
+- `multi_view_point_cloud_alignment`：暂不配置可视化器，即使出现在旧配置的可视化名单中也不输出阶段文件。
 
-NPZ 使用原始顶点及面索引，读取时不需要 pickle。Stage 始终通过 `PipelineData` 交接，可视化使用单独序列化并加载的数据，不接管计算数据。
+`visualization/gray_model.py` 实现单模型三视图；`visualization/comparison.py` 实现单组剖面对比。渲染器返回内存图片，文件保存由调用方负责。结果对比阶段的模型行、剖面列及拼接中间图片均不单独保存。
+
+Stage 始终通过内存中的 `PipelineData` 交接，渲染直接读取该数据包。常规运行不再保存类型化 NPZ、manifest、指标 JSON 或位移图；已有 Serializer 仍可用于显式的数据读写及历史产物读取。依赖旧阶段 NPZ 输出的实验脚本需要改用内存结果或历史运行目录。
 
 ## 验证
 
@@ -141,7 +141,9 @@ PYTHONPATH=src environment/bin/python scripts/validate_brow_depth.py
 MPLCONFIGDIR=/private/tmp/fme-matplotlib environment/bin/python scripts/validate_face_smoothing.py
 ```
 
-脚本在四组样本上执行完整五阶段流程，输出至 `artifacts_test/face_smoothing_validation/`。`validation.json` 记录运行路径、实际耗时、位移及相邻面法线夹角；各 Run 另存 `smoothing-stages.png`，按原始、平滑、最终三行和正、左、右三列比较。检查覆盖上游只读、固定区域保护、位移预算、重合副本一致性、后续阶段保留皮肤位移、配置快照及类型化读写。法线夹角只描述本次网格的局部变化，不代表相对 GT 的精度改善。
+脚本在四组样本上执行完整六阶段流程，输出至 `artifacts_test/face_smoothing_validation/`。`validation.json` 记录运行路径、实际耗时、位移及相邻面法线夹角；各 Run 另存 `smoothing-stages.png`，按原始、平滑、最终三行和正、左、右三列比较。检查覆盖上游只读、固定区域保护、重合副本一致性、后续阶段保留皮肤位移、配置快照及类型化读写。法线夹角只描述本次网格的局部变化，不代表相对 GT 的精度改善。
+
+移除有界求解后的回归可运行 `MPLCONFIGDIR=/private/tmp/fme-matplotlib environment/bin/python scripts/validate_direct_face_smoothing.py`。它执行四组正式六阶段算法，仅保存和渲染平滑阶段，并与前次2.2消融产物逐元素比较。当前四组坐标差均为0 mm，固定区域及后续皮肤保留检查通过；65项自动化测试通过。记录位于 `artifacts_test/direct_smoothing_validation_20261103-093616-78906ad3/`。该脚本依赖前次消融产物，不重新计算历史基线。
 
 `environment/bin/python scripts/validate_surface_fairing.py` 从上述已有四组产物恢复原始输入，重新执行区域检测和当前正式平滑，不执行后续五官增强。输出到唯一的 `artifacts_test/surface_fairing_<时间>-<标识>/`。它沿用 `artifacts_test/surface_relief/` 的原始 2 mm 检测尺度、原始与旧引导结果及色标，对比新方法的可移动域和内部域蓝色占比，并保存两个三视角灰模/热力图总览、处理后的 PLY、逐顶点数值和验证记录。
 
@@ -154,3 +156,109 @@ MPLCONFIGDIR=/private/tmp/fme-matplotlib environment/bin/python scripts/compare_
 ```
 
 脚本在四组样本上比较 L1–L4 四档 `fairing_scale_mm=1/2/3/4`，共 16 次完整流程。除平滑尺度外，各档算法配置相同。每次创建唯一的 `artifacts_test/fairing_levels_<时间>-<标识>/`，保存独立 YAML、运行快照、各阶段网格、最终三视角、平滑阶段灰模和同色标热力图，以及汇总数值。旧 A–E 引导滤波实验只保留在归档中。
+
+## 多视角点云对齐到 largeV
+
+`multi_view_point_cloud_alignment` 完整迁移 TRELLIS 的自动求解流程：原图/180° 人脸定位、三维解剖检查、多区域锚点和衣领排除、名义扫描器布局与平移搜索、多尺度几何 ICP、颜色 ICP，以及头部/面部核心区域质量评估。不使用历史位姿，也不读取对齐参考目录。
+
+依赖通过项目 uv 环境安装：
+
+```bash
+uv pip install --python environment/bin/python -e .
+```
+
+独立执行一个对象的四个视角：
+
+```bash
+environment/bin/face-model-enhance run \
+  --input_mesh data/input/dyx/mesh_largeV/model.ply \
+  --input_point_clouds data/input/dyx/multi_view_point_clouds \
+  --input_multi_view_rgb data/input/dyx/multi_view_rgb \
+  --output artifacts \
+  --config configs/pipeline_alignment.yaml
+```
+
+输入点云目录包含同名 PLY 和相机 JSON，支持 `up/down/left/right`。RGB 目录可省略；缺失的原生 RGB 使用点云颜色投影，定位失败时按原流程继续多区域搜索。当前名义布局为 up=0°、down=Rx45°、right=Ry−45°、left=Ry45°@Rz180°，目标模型应处于原始毫米坐标系。macOS 上 MediaPipe 的 CPU 图像处理仍需要可访问图形上下文；日志会记录定位不可用及回退原因。默认四个计算线程由阶段 YAML 配置。
+
+独立运行只要求模型和多视角点云。作为增强前置阶段时，将该阶段及其配置路径加入现有 Pipeline YAML 的首项，并继续提供现有人脸增强所需的单视角输入；各阶段通过 `PipelineData.alignment` 取得内存对齐结果。原来的默认流水线不变。
+
+多视角对齐阶段暂不设置可视化器、不导出对齐点云、报告或诊断图，结果通过 `PipelineData.alignment` 保存在内存中。低置信度结果在日志中记录并令 Run 失败，阻止后续阶段使用。达到启发式质量阈值的结果仍保留 `review_candidate` 状态，指标不等于人工验收。原始输入及既有参考目录不被覆盖。
+
+对齐使用 Open3D 保留 ASCII PLY 文本坐标的 float64 精度；普通增强运行继续沿用原来的网格读取方式。相机厂商 `Extrinsics`（IR→Color）保持不变，点云配准使用 `Transforms.View_to_Model` 及其逆矩阵；投影使用 Cointrinsics 与相机 −Z 前向约定。
+
+开发测试使用 `--output artifacts_test`。对包含旧版对齐产物的历史运行进行参考结果验收：
+
+```bash
+environment/bin/python -B -m face_model_enhancement.validation.alignment \
+  data/input/dyx \
+  artifacts_test/<run_id>/multi_view_point_cloud_alignment \
+  --output artifacts_test/dyx_validation.json
+```
+
+验收按原始点序比较全部点，要求最大坐标误差 ≤1e-7 mm、正反位姿矩阵最大元素误差 ≤1e-8、RGB 和标定不变、投影往返误差 ≤1e-6 像素。参考目录只由验收工具读取。当前四组数据的汇总报告为 `artifacts_test/alignment_validation.json`；这四组数据的通过情况不代表任意新扫描均可正确配准。
+
+## 已配准模型的区域热力图对比
+
+独立命令 `face-model-compare` 不运行增强或配准。输入为同一坐标系、单位 mm 的两个三角网格，以及**待对比网格**对应的 RGB 和相机 JSON（沿用现有 `Cointrinsics`、`Transforms.Model_to_View` 格式）。支持不同拓扑，颜色表示待对比网格到参考三角面的无符号最近距离；按顶点计算，图内采用重心插值。开放网格边缘及缺失参考表面仍按最近表面计算，不自动排除或补全。
+
+通过现有 `environment` 安装新增命令：
+
+```bash
+uv pip install --python environment/bin/python -e . --no-deps
+```
+
+单组示例，将 `/absolute/path/aligned_reference.ply` 替换为已配准参考模型：
+
+```bash
+environment/bin/face-model-compare run \
+  --input_mesh data/input/dyx/mesh_largeV/model.ply \
+  --input_reference /absolute/path/aligned_reference.ply \
+  --input_rgb data/input/dyx/multi_view_rgb/up.png \
+  --input_camera data/input/dyx/multi_view_point_clouds_aligned/up.json \
+  --config configs/pipeline_comparison.yaml \
+  --output artifacts_test --task test_regional_surface_comparison
+```
+
+单组输出名称取网格所在数据组目录名；对现有 `<组名>/mesh_<类型>/model.*` 布局取 `<组名>`，其他布局取 mesh 直接父目录名。需要明确指定目录身份时使用批量清单，即使清单只有一组。
+
+批量输入示例 `inputs.yaml`：所有相对路径以清单所在目录为基准，`directory` 表示数据组目录，**不会**再次作为其他路径的解析基准。每组目录名必须唯一，清单顺序就是拼图行顺序。
+
+```yaml
+schema_version: 1
+groups:
+  - directory: data/input/dyx
+    mesh: data/input/dyx/mesh_largeV/model.ply
+    reference: /absolute/path/dyx_aligned_reference.ply
+    rgb: data/input/dyx/multi_view_rgb/up.png
+    camera: data/input/dyx/multi_view_point_clouds_aligned/up.json
+  - directory: data/input/yy
+    mesh: data/input/yy/mesh_largeV/model.ply
+    reference: /absolute/path/yy_aligned_reference.ply
+    rgb: data/input/yy/multi_view_rgb/up.png
+    camera: data/input/yy/multi_view_point_clouds_aligned/up.json
+```
+
+```bash
+environment/bin/face-model-compare run --input_manifest inputs.yaml \
+  --config configs/pipeline_comparison.yaml \
+  --output artifacts_test --task test_regional_surface_comparison
+```
+
+在 `configs/stages/comparison_regions.yaml` 的 `regions` 中选择及排序 `forehead`、`eyes`、`nose`、`mouth`、`chin`、`cheeks`。双眼和双颊各为一个区域。分区是关键点驱动的几何近似，允许重叠；额头下边界、下巴上边界采用正面视图中的水平截平面。额头和脸颊仅限定上下高度，左右直接延伸至可见网格边缘；额头向上延伸至模型顶部，不估计发际线。面颊使用下眼睑至鼻底的高度带，内部排除鼻部，不延伸至嘴旁。眼周、鼻部、口周外扩默认分别为眼间距的 16%、8%、10%，可调整 `eye_padding_ratio`、`nose_padding_ratio`、`mouth_padding_ratio`。鼻部显示区域的外扩不改变脸颊的鼻部排除范围，区域允许重叠。额头和脸颊先确定三维高度边界，再在网格曲面上向外延伸，区域归属不再受原 RGB 相机可见域裁剪；出图由当前视图的网格首交点处理遮挡。鼻部、眼部、口部等投影分区仍检查原相机可见性。关键点检测失败或区域没有有效表面时明确报错。
+
+`configs/stages/surface_distance.yaml` 控制统一色标和渲染尺寸：默认 `green_yellow_red`（低差异为绿，逐渐过渡至黄、红）、0–3 mm、512×512 面板、两倍超采样。超出色标范围仅截断颜色，不修改距离。每个区域图保留完整正面 mesh，区域外显示灰模，没有隐私遮挡。
+
+```text
+artifacts_test/<yy-mm-dd-hh-mm>-<task>/
+├── run.log
+├── config_snapshot/
+│   ├── pipeline.yaml
+│   ├── inputs.yaml                 # 解析后的绝对输入路径，可再次作为清单
+│   └── stages/                     # 两个 Stage 的实际配置
+├── comparison.png                  # 所有组为行、所选区域为列，共享色标
+└── <组名>/surface_distance/
+    ├── <区域名>.png                # 各区域独立对比图，各含标题和色标
+    └── comparison.png              # 该组的横向拼图
+```
+
+正式运行改用 `--output artifacts`，无需 `--task`，目录按 `run_0001` 等已有最大编号递增。开发测试重复运行不会覆盖，重名追加 `_02` 等后缀。配置 `pipeline.visualize: []` 时只计算，不生成阶段目录或 PNG；运行级日志及配置快照仍保留。算法、渲染、PNG 写入分别计时。绘图或写图失败会记录 `output_incomplete`，命令返回非零退出码，并停止生成批量总图；其他已成功保存的子图保留供排查。

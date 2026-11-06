@@ -2,12 +2,14 @@
 from collections.abc import Mapping
 from typing import Protocol
 
+from PIL import Image
+
 from ..models import PipelineData
 
 
 class Visualizer(Protocol):
     """约定渲染器统一接收流水线数据包。"""
-    def render(self, data: PipelineData) -> None:
+    def render(self, data: PipelineData) -> Image.Image:
         """声明具体渲染器必须实现的渲染操作。"""
         ...
 
@@ -18,7 +20,7 @@ class VisualizerRegistry:
         """持有独立的映射容器，供后续按阶段查找渲染器。"""
         self._renderers = dict(renderers)
 
-    def render(self, stage_name: str, data: PipelineData) -> None:
+    def render(self, stage_name: str, data: PipelineData) -> Image.Image:
         """查找当前阶段对应的渲染器并调用其渲染方法。"""
-        self._renderers[stage_name].render(data)
+        return self._renderers[stage_name].render(data)
 

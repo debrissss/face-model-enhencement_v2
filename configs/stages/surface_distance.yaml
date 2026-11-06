@@ -1,0 +1,8 @@
+schema_version: 1
+parameters:
+  color_min_mm: 0.0
+  color_max_mm: 3.0
+  # 0 mm 绿色，差异增大依次过渡至黄色、红色；保持实际距离不变。
+  colormap: green_yellow_red
+  render_resolution: 512
+  supersampling: 2

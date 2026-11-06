@@ -9,9 +9,15 @@ import trimesh
 from ..models import ByteArray, Camera, DepthMap, MeshData, NormalMap, RGBImage
 
 
-def read_mesh(path: Path) -> MeshData:
+def read_mesh(path: Path, *, preserve_ply_precision: bool = False) -> MeshData:
     # PLY 纹理接缝默认会拆分顶点，单独设置 process=False 仍不足以保留原始索引。
     """读取原始网格，关闭自动几何处理和纹理接缝拆点以保留索引。"""
+    if preserve_ply_precision and path.suffix.lower() == ".ply":
+        # TRELLIS 用 Open3D 读取 ASCII float 坐标为 float64；trimesh 会先量化为 float32。
+        import open3d as o3d
+        mesh = o3d.io.read_triangle_mesh(str(path), print_progress=False)
+        return MeshData(np.asarray(mesh.vertices).copy(), np.asarray(mesh.triangles, dtype=np.int64).copy(),
+                        np.asarray(mesh.vertex_colors).copy() if mesh.has_vertex_colors() else None)
     mesh = trimesh.load(path, process=False, force="mesh", maintain_order=True, fix_texture=False, skip_materials=True)
     return MeshData(np.asarray(mesh.vertices).copy(), np.asarray(mesh.faces).copy())
 

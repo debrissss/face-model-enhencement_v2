@@ -1,15 +1,16 @@
 """按数据类型序列化含数组的数据类，不按阶段名称分派读写逻辑。"""
-from dataclasses import fields
+from dataclasses import fields, replace
 import json
 from pathlib import Path
 from typing import Generic, TypeVar
 
 import numpy as np
 
-from ..models import SmoothingResult, BrowDepthResult, DepthMap, Camera, ComparisonResult, ConstraintResult, MeshData, NormalMap, Regions, RGBImage
+from .nested_arrays import AlignmentSerializer, NestedArraySerializer
+from ..models import ComparisonRegions, SurfaceDistanceResult, MultiViewAlignment, MultiViewPointClouds, MultiViewRGB, SmoothingResult, BrowDepthResult, DepthMap, Camera, ComparisonResult, ConstraintResult, MeshData, NormalMap, Regions, RGBImage
 
-Artifact = SmoothingResult | BrowDepthResult | DepthMap | MeshData | RGBImage | NormalMap | Camera | Regions | ConstraintResult | ComparisonResult
-ArtifactT = TypeVar("ArtifactT", SmoothingResult, BrowDepthResult, DepthMap, MeshData, RGBImage, NormalMap, Camera, Regions, ConstraintResult, ComparisonResult)
+Artifact = ComparisonRegions | SurfaceDistanceResult | MultiViewAlignment | MultiViewPointClouds | MultiViewRGB | SmoothingResult | BrowDepthResult | DepthMap | MeshData | RGBImage | NormalMap | Camera | Regions | ConstraintResult | ComparisonResult
+ArtifactT = TypeVar("ArtifactT", ComparisonRegions, SurfaceDistanceResult, SmoothingResult, BrowDepthResult, DepthMap, MeshData, RGBImage, NormalMap, Camera, Regions, ConstraintResult, ComparisonResult)
 
 
 class ArraySerializer(Generic[ArtifactT]):
@@ -40,8 +41,20 @@ class ArraySerializer(Generic[ArtifactT]):
         return self.data_type(**values)
 
 
+class ComparisonRegionsSerializer(ArraySerializer[ComparisonRegions]):
+    """JSON 将元组编码为列表；读取时恢复区域名称的不可变顺序。"""
+    def load(self, path: Path) -> ComparisonRegions:
+        result = super().load(path)
+        return replace(result, names=tuple(result.names))
+
+
 # 序列化器按数据类型显式注册，新增阶段可以继续复用同一组读写实现。
 SERIALIZERS = {
+    ComparisonRegions: ComparisonRegionsSerializer(ComparisonRegions),
+    SurfaceDistanceResult: ArraySerializer(SurfaceDistanceResult),
+    MultiViewAlignment: AlignmentSerializer(),
+    MultiViewPointClouds: NestedArraySerializer[MultiViewPointClouds](),
+    MultiViewRGB: NestedArraySerializer[MultiViewRGB](),
     SmoothingResult: ArraySerializer(SmoothingResult),
     DepthMap: ArraySerializer(DepthMap),
     BrowDepthResult: ArraySerializer(BrowDepthResult),

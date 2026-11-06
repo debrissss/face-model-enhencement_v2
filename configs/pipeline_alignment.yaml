@@ -1,0 +1,6 @@
+schema_version: 1
+pipeline:
+  stages:
+    - id: multi_view_point_cloud_alignment
+      config: stages/multi_view_point_cloud_alignment.yaml
+  visualize: []

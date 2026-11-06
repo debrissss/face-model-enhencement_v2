@@ -1,7 +1,6 @@
-"""保护五官、区域边界和面朝向的有界三维表面整形。"""
+"""保护五官与固定边界，直接求解曲率和位置保持能量的三维表面整形。"""
 import numpy as np
 from scipy import sparse
-from scipy.optimize import minimize
 from scipy.sparse.csgraph import dijkstra
 from scipy.sparse.linalg import spsolve
 from scipy.spatial import ConvexHull
@@ -115,83 +114,12 @@ def compute_reference_surface(vertices: FloatArray, faces: IntArray, scale_mm: f
     return spsolve((mass + scale_mm**2 * stiffness).tocsc(), mass @ (vertices - center)) + center
 
 
-def constrain_face_orientation(vertices: FloatArray, faces: IntArray, directions: FloatArray,
-                               free: IntArray, scalar: FloatArray, limit: FloatArray,
-                               matrix: sparse.csr_matrix, rhs: FloatArray) -> FloatArray:
-    """对实际出现朝向压缩的局部面求带面积约束的整形，保护相邻面和位移预算。
-
-    仅优化受影响面的可移动顶点，同步约束所有与这些顶点相连的面。
-    约束为沿原始面法线的有向投影面积至少保留 5%，不回退整个网格。
-    """
-    original = vertices[faces]
-    cross = np.cross(original[:, 1] - original[:, 0], original[:, 2] - original[:, 0])
-    area = np.linalg.norm(cross, axis=1)
-    normals = cross / area[:, None]
-    positions = vertices.copy()
-    positions[free] += scalar[:, None] * directions[free]
-    triangles = positions[faces]
-    signed = (np.cross(triangles[:, 1] - triangles[:, 0], triangles[:, 2] - triangles[:, 0])
-              * normals).sum(1) / area
-    affected = signed < .05
-    if not affected.any():
-        return scalar
-    mapping = np.full(len(vertices), -1, dtype=np.int64)
-    mapping[free] = np.arange(len(free))
-    selected = np.unique(mapping[faces[affected]])
-    selected = selected[selected >= 0]
-    ids = free[selected]
-    local_map = np.full(len(vertices), -1, dtype=np.int64)
-    local_map[ids] = np.arange(len(ids))
-    incident = (local_map[faces] >= 0).any(1)
-    local_faces = faces[incident]
-    indices = local_map[local_faces]
-    original_area, reference_normals = area[incident], normals[incident]
-    scale = np.sqrt(matrix.diagonal()[selected])
-    hessian = matrix[selected][:, selected].toarray() / scale[:, None] / scale[None, :]
-    other = scalar.copy(); other[selected] = 0
-    target = (rhs[selected] - matrix[selected] @ other) / scale
-
-    def objective(value):
-        gradient = hessian @ value - target
-        return .5 * value @ (gradient - target), gradient
-
-    def constraints(value):
-        current = positions[local_faces].copy()
-        for corner in range(3):
-            valid = indices[:, corner] >= 0
-            local = indices[valid, corner]
-            current[valid, corner] = (vertices[local_faces[valid, corner]]
-                                     + (value[local] / scale[local])[:, None] * directions[ids[local]])
-        edge1, edge2 = current[:, 1] - current[:, 0], current[:, 2] - current[:, 0]
-        values = (np.cross(edge1, edge2) * reference_normals).sum(1) / original_area - .05
-        gradients = (np.cross(edge2, reference_normals), np.cross(reference_normals, edge1))
-        corner_gradients = (-gradients[0] - gradients[1], *gradients)
-        jacobian = np.zeros((len(local_faces), len(ids)))
-        for corner in range(3):
-            valid = indices[:, corner] >= 0
-            local = indices[valid, corner]
-            derivative = (corner_gradients[corner][valid] * directions[ids[local]]).sum(1)
-            jacobian[np.flatnonzero(valid), local] += derivative / original_area[valid] / scale[local]
-        return values, jacobian
-
-    result = minimize(objective, scalar[selected] * scale, jac=True, method='SLSQP',
-                      bounds=list(zip(-limit[selected] * scale, limit[selected] * scale)),
-                      constraints={'type': 'ineq', 'fun': lambda x: constraints(x)[0],
-                                   'jac': lambda x: constraints(x)[1]},
-                      options={'maxiter': 500, 'ftol': 1e-9})
-    if not result.success or constraints(result.x)[0].min() < -1e-7:
-        raise RuntimeError(f'Face orientation constraint failed: {result.message}')
-    output = scalar.copy()
-    output[selected] = result.x / scale
-    return output
-
-
 def fair_vertices(vertices: FloatArray, faces: IntArray, gate: FloatArray,
                   config: FaceSmoothingConfig) -> FloatArray:
-    """使用表面离散算子，求相对原始位置的有界整形位移。
+    """直接求解曲率与原始位置保持的三维二次能量，不施加位移或面片朝向约束。
 
-    保护区位移为零，过渡区逐渐增加位置约束并收紧位移上限。
-    位置锚点和总预算始终相对原始几何，不依赖颜色或重新归一化热力图。
+    固定区位移为零，过渡区通过更强的位置惩罚减小位移。
+    刚度、面积及过渡权重在求解中保持不变。
     """
     stiffness, area, _ = build_fairing_operator(vertices, faces)
     free = np.flatnonzero(gate > 0)
@@ -203,41 +131,13 @@ def fair_vertices(vertices: FloatArray, faces: IntArray, gate: FloatArray,
     inverse_area[gate == 0] = 0
     mass_inverse = sparse.diags(inverse_area)
     # 在原点附近计算，避免模型绝对坐标带来额外消减误差。
-    curvature = stiffness @ (vertices - vertices.mean(0))
-    matrix = sparse.csr_matrix((len(free), len(free)))
-    rhs = np.zeros(len(free))
     strength = config.fairing_scale_mm**4
     bending = stiffness.T @ mass_inverse @ stiffness
     system = strength * bending[free][:, free] + sparse.diags(area[free] / gate[free]**2)
     target = -strength * (bending[free] @ (vertices - vertices.mean(0)))
     movement = spsolve(system.tocsc(), target)
-    # 用三维整形给出的方向替代原始凹坑壁法线；随后按同一能量求解有界长度。
-    directions = np.zeros_like(vertices)
-    directions[free] = normalize(movement)
-    for axis in range(3):
-        operator = stiffness[:, free] @ sparse.diags(directions[free, axis])
-        matrix += strength * (operator.T @ mass_inverse @ operator)
-        rhs -= strength * (operator.T @ (inverse_area * curvature[:, axis]))
-    matrix += sparse.diags(area[free] / gate[free]**2)
-    scalar = spsolve(matrix.tocsc(), rhs)
-    limit = gate[free] * config.maximum_displacement_mm
-    if (np.abs(scalar) > limit).any():
-        # 对已有实际超预算的解求带边界的二次优化，而非直接裁剪产生接痕。
-        scale = np.sqrt(matrix.diagonal())
-        system = sparse.diags(1 / scale) @ matrix @ sparse.diags(1 / scale)
-        target = rhs / scale
-        def objective(value):
-            residual = system @ value - target
-            return .5 * value @ (residual - target), residual
-        result = minimize(objective, np.clip(scalar, -limit, limit) * scale, jac=True,
-                          method='L-BFGS-B', bounds=list(zip(-limit * scale, limit * scale)),
-                          options={'maxiter': 2000, 'ftol': 1e-12, 'gtol': 1e-7, 'maxcor': 20})
-        if not result.success:
-            raise RuntimeError(f'Bounded surface fairing failed: {result.message}')
-        scalar = result.x / scale
-    scalar = constrain_face_orientation(vertices, faces, directions, free, scalar, limit, matrix, rhs)
     positions = vertices.copy()
-    positions[free] += scalar[:, None] * directions[free]
+    positions[free] += movement
     return positions
 
 

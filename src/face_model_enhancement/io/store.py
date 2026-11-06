@@ -4,11 +4,19 @@ import json
 from pathlib import Path
 
 from .arrays import ARTIFACT_TYPES, SERIALIZERS
-from ..models import PipelineData
+from .mesh import SERIALIZERS as PLY_SERIALIZERS
+from ..models import MeshData, PipelineData
 
 
 class ArtifactStore:
     """将数据包字段交给对应序列化器，并管理恢复数据包所需的类型清单。"""
+    def save_mesh(self, data: MeshData, stage_dir: Path) -> Path:
+        """为三维可视化组织网格路径，按数据类型选择 PLY Serializer。"""
+        stage_dir.mkdir(parents=True, exist_ok=True)
+        path = stage_dir / "mesh.ply"
+        PLY_SERIALIZERS[type(data)].save(data, path)
+        return path
+
     def save(self, data: PipelineData, stage_dir: Path) -> Path:
         """按字段类型保存已有数据，并记录来源名称和字段类型。"""
         stage_dir.mkdir(parents=True, exist_ok=True)

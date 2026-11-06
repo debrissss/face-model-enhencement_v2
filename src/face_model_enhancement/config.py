@@ -76,13 +76,12 @@ class BrowDepthConfig:
 
 @dataclass(frozen=True)
 class FaceSmoothingConfig:
-    """有界三维表面整形参数，长度及位移预算均使用毫米。"""
+    """三维曲率平滑与处理域参数，长度均使用毫米。"""
     protect_nose: bool = True
     fairing_scale_mm: float = 4.
     normal_scale_mm: float = 3.
     domain_padding_mm: float = 6.
     minimum_facing_cosine: float = -.4
-    maximum_displacement_mm: float = 2.
     transition_mm: float = 2.
 
     def __post_init__(self) -> None:
@@ -92,12 +91,23 @@ class FaceSmoothingConfig:
             raise ValueError('Normal scale must be finite and nonnegative.')
         if not 0 <= self.domain_padding_mm < float('inf'):
             raise ValueError('Domain padding must be finite and nonnegative.')
-        lengths = (self.maximum_displacement_mm, self.transition_mm, self.fairing_scale_mm)
+        lengths = (self.transition_mm, self.fairing_scale_mm)
         if any(not 0 < value < float('inf') for value in lengths):
             raise ValueError('Smoothing scales must be finite and positive.')
 
 
-StageConfig = RegionDetectionConfig | FaceSmoothingConfig | FrontalNormalConfig | EyeHeightConfig | BrowDepthConfig | ResultComparisonConfig
+@dataclass(frozen=True)
+class MultiViewAlignmentConfig:
+    """原工具自动配准；保留固定算法参数，仅配置运行资源与定位模型。"""
+    model: Path
+    threads: int = 4
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.threads, int) or self.threads < 1:
+            raise ValueError("Alignment threads must be a positive integer.")
+
+
+StageConfig = MultiViewAlignmentConfig | RegionDetectionConfig | FaceSmoothingConfig | FrontalNormalConfig | EyeHeightConfig | BrowDepthConfig | ResultComparisonConfig
 
 
 @dataclass(frozen=True)
@@ -129,7 +139,7 @@ def load_config(path: Path) -> PipelineConfig:
     path = path.resolve()
     pipeline = read_yaml(path)["pipeline"]
     specs = []
-    types = {"region_detection": RegionDetectionConfig, "frontal_normal_constraint": FrontalNormalConfig,
+    types = {"multi_view_point_cloud_alignment": MultiViewAlignmentConfig, "region_detection": RegionDetectionConfig, "frontal_normal_constraint": FrontalNormalConfig,
              "result_comparison": ResultComparisonConfig, "brow_depth_constraint": BrowDepthConfig,
              "face_smoothing": FaceSmoothingConfig, "eye_height_constraint": EyeHeightConfig}
     # 主配置中的阶段路径以主配置目录为基准，阶段内部的模型路径另行解析。
@@ -137,7 +147,7 @@ def load_config(path: Path) -> PipelineConfig:
         stage_path = (path.parent / stage["config"]).resolve()
         parameters = read_yaml(stage_path)["parameters"]
         name = stage["id"]
-        if name == "region_detection":
+        if name in ("region_detection", "multi_view_point_cloud_alignment"):
             # 模型路径属于阶段配置，应以阶段 YAML 所在目录为基准。
             parameters["model"] = (stage_path.parent / parameters["model"]).resolve()
         specs.append(StageSpec(name, types[name](**parameters), stage_path))
@@ -147,8 +157,9 @@ def load_config(path: Path) -> PipelineConfig:
               for smoothing in ([], ["face_smoothing"])
               for eye_height in ([], ["eye_height_constraint"])
               for brow in ([], ["brow_depth_constraint"])]
-    if not names or not any(names == order[:len(names)] for order in orders):
-        raise ValueError("Stages must follow region_detection, optional face_smoothing, frontal_normal_constraint, "
+    enhancement_names = names[1:] if names[:1] == ["multi_view_point_cloud_alignment"] else names
+    if not names or (enhancement_names and not any(enhancement_names == order[:len(enhancement_names)] for order in orders)):
+        raise ValueError("Stages must start with optional multi_view_point_cloud_alignment, followed by region_detection, optional face_smoothing, frontal_normal_constraint, "
                          "optional eye_height_constraint, optional brow_depth_constraint, result_comparison.")
     visualize = tuple(pipeline.get("visualize", []))
     # 可视化名单只能引用本次已配置的阶段。
